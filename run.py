@@ -1,6 +1,6 @@
-import copy
 import json
 import os.path
+import time
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -12,7 +12,7 @@ from googleapiclient.errors import HttpError
 SCOPES = ["https://www.googleapis.com/auth/presentations"]
 
 # The ID of a sample presentation.
-PRESENTATION_ID = "1BzCk4zhWwZ4mJcwC7HfL7Izs_l6LlpUYPIqXUpTIxVw"
+PRESENTATION_ID = "1EpF5x79weje2_LP3hOPS4y_JCi0kxVXTc2J7Qb6SLew"
 
 
 colors = [
@@ -45,6 +45,7 @@ def find_matching_element(elements, text):
 
 def duplicate_slide(service, object_id):
     print(f"Duplicating {object_id}")
+    time.sleep(0.2)
     response = (
         service.presentations()
         .batchUpdate(
@@ -102,18 +103,36 @@ def move_slides_to_end(service, object_ids):
     ).execute()
 
 
+def is_text_box_containing(elt, text):
+    has_shape_keys = "shape" in elt and "shapeType" in elt["shape"]
+    is_text_box = has_shape_keys and elt["shape"]["shapeType"] == "TEXT_BOX"
+    has_text_key = "text" in elt["shape"]
+
+    if is_text_box and not has_text_key:
+        print(
+            "Found text box without the 'text' key. "
+            "This is ok if there are weird text boxes with no text in them, "
+            "and those parts of the slide will just be skipped. Elt was: "
+            f"{elt}"
+        )
+        return False
+
+    return is_text_box and has_text_key and text in json.dumps(elt["shape"]["text"])
+
+
 def modify_background_color_of_shapes_containing(service, match_string, color_index):
     all_slides = (
         service.presentations().get(presentationId=PRESENTATION_ID).execute()["slides"]
     )
     page_elements = [y for x in all_slides for y in x["pageElements"]]
-    shapes = [
-        x
-        for x in page_elements
-        if "shape" in x
-        and x["shape"]["shapeType"] == "TEXT_BOX"
-        and match_string in json.dumps(x["shape"]["text"])
-    ]
+    shapes = [x for x in page_elements if is_text_box_containing(x, match_string)]
+    if not shapes:
+        print(
+                "Warning: Found no text boxes to modify the background color in. "
+                "Either there were no text boxes or else no text boxes contained the match string "
+                f"'{match_string}'.\n\nPage elements were:\n\n{page_elements}")
+        return
+
     service.presentations().batchUpdate(
         presentationId=PRESENTATION_ID,
         body={
@@ -175,6 +194,7 @@ def main():
                 f"Group {i}",
                 color_index=(7 * i) % len(colors),
             )
+            time.sleep(5)
 
         return service, slides
     except HttpError as err:
